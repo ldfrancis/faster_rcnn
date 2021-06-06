@@ -1,3 +1,6 @@
+# This implementation was inspired by tryolab's luminoth
+# https://github.com/tryolabs/luminoth
+
 from typing import Tuple
 
 import tensorflow as tf
