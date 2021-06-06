@@ -2,8 +2,8 @@ import tensorflow as tf
 import tensorflow_datasets as tfds
 
 
-def obtain_pascal_voc():
-    ds, info = tfds.load("voc", split="train", with_info=True, shuffle_files=True)
+def obtain_pascal_voc(split="train"):
+    ds, info = tfds.load("voc", split=split, with_info=True, shuffle_files=True)
     return ds, info
 
 
