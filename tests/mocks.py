@@ -5,10 +5,8 @@ from tensorflow.python.ops.variables import Variable
 
 
 class MockDataset:
-    def __init__(self):
-        self.h, self.w = 678, 764
-        self.limit = 10
-        self.idx = 0
+    def __init__(self, limit=1):
+        self.limit = limit
 
     @staticmethod
     def get_image():
@@ -20,12 +18,26 @@ class MockDataset:
         )
 
     def _get_bboxes(self):
-        return tf.Variable(
-            np.random.randint(0, 255, (4, 4)), dtype=tf.int32, name="mockimage"
+        x1, x2 = tf.unstack(
+            tf.sort(
+                tf.constant(np.random.uniform(0, 1, (4, 2)), tf.float32, name="x"),
+                axis=1,
+            ),
+            axis=1,
         )
+        y1, y2 = tf.unstack(
+            tf.sort(
+                tf.constant(np.random.uniform(0, 1, (4, 2)), tf.float32, name="y"),
+                axis=1,
+            ),
+            axis=1,
+        )
+        bboxes = tf.stack([y1, x1, y2, x2], axis=1)
+
+        return bboxes
 
     def _get_lbl(self):
-        lbl = tf.Variable([1, 1, 1, 1], dtype=tf.float32)
+        lbl = tf.Variable([1, 1, 1, 1], dtype=tf.int32)
         return lbl
 
     def __iter__(self):
@@ -34,14 +46,14 @@ class MockDataset:
 
     def __next__(self):
 
-        if self.idx >= 10:
+        if self.idx >= 1:
             raise StopIteration
 
         # create example
         example = {
             "image": self.get_image(),
             "objects": {
-                "box": self._get_bboxes(),
+                "bbox": self._get_bboxes(),
                 "label": self._get_lbl(),
             },
         }
@@ -72,7 +84,7 @@ class MockFeatureMap:
     def create_featmap():
         H, W = np.random.randint(14, 36, (2,), dtype=np.int32)
         return tf.Variable(
-            np.random.randint(0, 255, (1, H, W, 1024)),
+            np.random.uniform(0, 10, (1, H, W, 1024)),
             dtype=tf.float32,
             name="mockimage",
         )
@@ -91,6 +103,7 @@ mock_config = {
         "nms_threshold": 0.7,
         "top_n": 2000,
         "pool_size": 7,
+        "stride": 16,
     },
     "detector": {
         "name": "detector",
@@ -101,8 +114,9 @@ mock_config = {
         "nms_threshold": 0.7,
     },
     "trainer": {
+        "experiment_name": "test_exp",
         "name": "trainer",
-        "base_size": 600,
+        "image_base_size": 600,
         "stride": 16,
         "grad_clip": 10,
         "bg_low": 0,
@@ -117,13 +131,13 @@ mock_config = {
         "pos_iou_thresh": 0.7,
         "pos_anchors_perc": 0.5,
         "anchor_batch": 256,
-        "epochs": 100,
+        "epochs": 1,
         "backbone": "resnet101",
         "detector_lr": 1e-4,
         "backbone_head_lr": 1e-4,
         "backbone_tail_lr": 1e-4,
         "rpn_lr": 1e-4,
         "train_type": "4step",
+        "base_size": 600,
     },
-    "base_size": 600,
 }
