@@ -1,0 +1,4 @@
+matplotlib
+tensorflow
+tensorboard
+tensorflow_datasets
