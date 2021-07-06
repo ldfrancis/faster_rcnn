@@ -1,22 +1,24 @@
-
-backbone: resnet101
-
 rpn:
   name: rpn
+  backbone: resnet101
   anchor_base_size: 256
   anchor_ratios: [0.5, 1, 2]
   anchor_scales: [0.125, 0.25, 0.5, 1, 2]
   base_conv_channels: 512
+  input_channels: 1024
   score_thresh: 0.7
   nms_threshold: 0.7
   top_n: 2000
   pool_size: 7
+  stride: 16
 
 detector:
   name: detector
   num_classes: 20
-  input_channels: 1024
+  input_channels: 2048
   top_n: 19
+  score_thresh: 0.7
+  nms_threshold: 0.7
 
 trainer:
   name: trainer
@@ -43,4 +45,3 @@ trainer:
   rpn_lr: 1e-4
   train_type: 4step
   
-base_size: 600
