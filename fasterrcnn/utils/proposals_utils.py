@@ -4,7 +4,7 @@ import tensorflow as tf
 from tensorflow import Tensor
 
 
-@tf.function
+@tf.function(experimental_relax_shapes=True)
 def filter_proposals(
     proposals: Tensor,
     scores: Tensor,

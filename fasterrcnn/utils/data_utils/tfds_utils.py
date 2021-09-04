@@ -22,7 +22,7 @@ def create_data(example, base_size):
     return image, bbox
 
 
-def preprocess_data(image, bbox, base_size):
+def modify_image_size(image, base_size):
     H, W, _ = image.shape
     SIZE = base_size
     aspect = W / H
@@ -32,12 +32,21 @@ def preprocess_data(image, bbox, base_size):
     else:
         new_H = SIZE
         new_W = int(SIZE * aspect)
+
+    image = tf.image.resize(image, [new_H, new_W])
+
+    return image, new_H, new_W
+
+
+def preprocess_data(image, bbox, base_size):
+    H, W, _ = image.shape
+    image, new_H, new_W = modify_image_size(image, base_size)
+
     x1, y1, x2, y2, c = tf.unstack(bbox, 5, axis=1)
     x1 = x1 * new_W / W
     y1 = y1 * new_H / H
     x2 = x2 * new_W / W
     y2 = y2 * new_H / H
     bbox = tf.stack([x1, y1, x2, y2, c], axis=1)
-    image = tf.image.resize(image, [new_H, new_W])
 
     return tf.cast(image, tf.int32), bbox

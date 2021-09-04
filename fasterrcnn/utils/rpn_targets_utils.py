@@ -9,7 +9,7 @@ from fasterrcnn.utils.bbox_utils import bbox_overlap, encode
 from tensorflow import Tensor
 
 
-@tf.function
+@tf.function(experimental_relax_shapes=True)
 def generate_rpn_targets(
     anchors: Tensor,
     gt_bboxes: Tensor,

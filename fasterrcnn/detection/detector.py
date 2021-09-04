@@ -27,7 +27,7 @@ class Detector(tf.keras.Model):
             self.input_channels, self.num_classes, name=f"{self._name}_Architecture"
         )
 
-        self.build((1, 7, 7, self.input_channels))
+        self.build((1, 4, 4, self.input_channels))
 
     def call(self, x: Tensor) -> Tuple[Tensor, Tensor]:
         """Obtain bounding box deltas/offset and corresponding class scores given a

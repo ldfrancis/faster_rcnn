@@ -3,15 +3,17 @@ from pathlib import Path
 from typing import Any, Dict
 
 import click
+import matplotlib.pyplot as plt
 import tensorflow as tf
 import yaml
+from absl import logging as logger
 
 from fasterrcnn.frcnn import FRCNN
 from fasterrcnn.trainer import Trainer
 from fasterrcnn.utils.config_utils import load_config
 from fasterrcnn.utils.data_utils import obtain_dataset
-
-logging.basicConfig(level=logging.DEBUG)
+from fasterrcnn.utils.data_utils.data_utils import display_image, obtain_class_names
+from fasterrcnn.utils.data_utils.tfds_utils import modify_image_size
 
 
 @click.command()
@@ -54,9 +56,7 @@ logging.basicConfig(level=logging.DEBUG)
 def main(train, log, dataset, input, output):
 
     cfg = load_config("./config.yaml")
-    detector_cfg = cfg["detector"]
-    rpn_cfg = cfg["rpn"]
-    frcnn = FRCNN({"detector": detector_cfg, "rpn": rpn_cfg})
+    frcnn = FRCNN(cfg)
     cfg["trainer"]["log"] = log
     cfg["trainer"]["dataset"] = dataset
 
@@ -76,10 +76,8 @@ def main(train, log, dataset, input, output):
         output_path.mkdir(parents=True, exist_ok=True)
 
         for inp_path in inputs:
+            logger.warn(f"Detecting objects in {inp_path.absolute()}")
+            image, boxes, scores = frcnn(f"{inp_path.absolute()}")
 
-            image = tf.io.read_file(f"{inp_path.absolute()}")
-            image = tf.io.decode_image(image)
-
-            boxes, scores = frcnn(image)
-
-            logging.info(boxes, scores)
+            _ = display_image(image, boxes, obtain_class_names(cfg["dataset"]), scores)
+            plt.savefig(output_path / inp_path.name)

@@ -4,7 +4,7 @@ import tensorflow as tf
 from tensorflow import Tensor
 
 
-@tf.function
+@tf.function(experimental_relax_shapes=True)
 def to_center_width_height(bboxes: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
     """Computes the center coordinates, width, and height of a bounding box from its
     corners coordinates x1,y1,x2,y2
@@ -26,7 +26,7 @@ def to_center_width_height(bboxes: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tens
     return center_x, center_y, width, height
 
 
-@tf.function
+@tf.function(experimental_relax_shapes=True)
 def encode(bboxes: Tensor, gt_bboxes: Tensor) -> Tensor:
     """Encodes the ground-truth bounding boxes wrt to another Tensor of bounding boxes
     (This could be anchors or rpn proposed boxes) to geenerate the targets for bounding
@@ -59,7 +59,7 @@ def encode(bboxes: Tensor, gt_bboxes: Tensor) -> Tensor:
     return tf.concat([d_x, d_y, d_w, d_h], axis=1)
 
 
-@tf.function
+@tf.function(experimental_relax_shapes=True)
 def decode(bboxes: Tensor, deltas: Tensor) -> Tensor:
     """Decodes the predicted bounding box regression deltas to obtain the expected
     ground-truth bounding boxes.

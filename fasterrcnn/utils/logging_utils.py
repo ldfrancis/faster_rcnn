@@ -65,7 +65,7 @@ class TensorboardLogger(BaseLogger):
             }
 
         # log to weight and biases
-        if self.cfg["log"] and self.cfg.get["wandb"]:
+        if self.cfg["log"] and self.cfg.get("wandb"):
             self.to_wandb()
 
     def log(self, info_dict: Dict[str, Any]) -> None:

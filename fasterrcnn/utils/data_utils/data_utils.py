@@ -83,3 +83,31 @@ def display_image(image, bbox, class_names, scores=None):
             cls_name = class_names_[cls_idx]
         cls_score = None if scores is None else scores[idx]
         add_rectangle(ax, box, cls_name, cls_score)
+
+    return ax
+
+
+def obtain_class_names(dataset="voc"):
+    if dataset == "voc":
+        return [
+            "aeroplane",
+            "bicycle",
+            "bird",
+            "boat",
+            "bottle",
+            "bus",
+            "car",
+            "cat",
+            "chair",
+            "cow",
+            "diningtable",
+            "dog",
+            "horse",
+            "motorbike",
+            "person",
+            "pottedplant",
+            "sheep",
+            "sofa",
+            "train",
+            "tvmonitor",
+        ]

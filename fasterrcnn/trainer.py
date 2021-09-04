@@ -239,7 +239,7 @@ class Trainer:
         for epoch in range(1, epochs + 1):
             mean_loss = tf.keras.metrics.Mean()
             for b, example in enumerate(self.dataset):
-                image, gt_bboxes = create_data(example, self.cfg["base_size"])
+                image, gt_bboxes = create_data(example, self.cfg["image_base_size"])
                 loss = self.train_approximate_step(
                     image,
                     gt_bboxes,
@@ -407,7 +407,7 @@ class Trainer:
         in the paper
         """
         epochs = self.cfg["epochs"]
-        base_size = self.cfg["base_size"]
+        base_size = self.cfg["image_base_size"]
 
         def _run_trainer_step(step: int, message: str):
             self.logger.warning(f"\nStep {step}: {message}")

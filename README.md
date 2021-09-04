@@ -8,9 +8,12 @@ This implementation attempts to present all the components of faster R-CNN in si
 
 ## Installation
 To install, just clone the repository and install with pip as illustrated below
+
+```bash
 git clone https://github.com/ldfrancis/faster_rcnn.git
 cd faster_rcnn
 pip install .
+```
 
 NB: You might find it helpful to use a virtual environment
 ## Usage
@@ -34,7 +37,7 @@ To use as a cli application, use any of the following commands to perform the de
 
     `fasterrcnn --train --dataset voc`
 
-    This trains the model on the pascal voc dataset. To train on the coco dataset, you can specify 'coco'. To train on a custom dataset ...
+    This trains the model on the pascal voc dataset. Training can only be done on pascal voc as this repo focuses on the implementation process.
 
 
 ### as a package
@@ -141,19 +144,19 @@ The processed roi features from the backbone's tail network is passed into the d
 ### utility functions
 Besides the models for the Backbone, RPN, and Detector, several utility functions are used to transform tensors when moving from one model to another. For example, to move from the RPN to the Detector, the proposed bounding boxes have to be filtered and an operation known as roi pooling has to be performed. Links to the implementation of each of these utility functions are provided below:
 
-[to_center_width_height]() 
-[encode]() [decode]()
-[bbox_overlap]() 
-[swap_xy]()
-[generate_reference_anchors]() 
-[generate_anchors]() 
-[generate_rpn_targets]()
-[normalize_bboxes]()
-[roi_pooling]() 
-[filter_proposals]() 
-[apply_nms]() 
-[per_class_nms]() 
-[generate_detector_targets]()
+[to_center_width_height]() | 
+[encode]() [decode]() | 
+[bbox_overlap]() | 
+[swap_xy]() | 
+[generate_reference_anchors]() | 
+[generate_anchors]() | 
+[generate_rpn_targets]() | 
+[normalize_bboxes]() | 
+[roi_pooling]() | 
+[filter_proposals]() |  
+[apply_nms]() | 
+[per_class_nms]() |  
+[generate_detector_targets]() 
 
 
 **NB: This repository is entirely focused on the implementation of faster rcnn. To further understand the working principle of Faster RCNN, consider studying the [original paper]() and also checkout [this blog post by tryolabs](). [This workshop exercise]() by tryolabs is also helpful**

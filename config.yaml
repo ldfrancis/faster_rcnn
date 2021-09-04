@@ -22,7 +22,8 @@ detector:
 
 trainer:
   name: trainer
-  base_size: 600
+  experiment_name: "sample_train"
+  image_base_size: 600
   stride: 16
   grad_clip: 10
   bg_low: 0
@@ -45,3 +46,5 @@ trainer:
   rpn_lr: 1e-4
   train_type: 4step
   
+image_base_size: 600
+dataset: voc

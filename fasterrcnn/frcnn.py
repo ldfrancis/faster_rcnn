@@ -1,7 +1,10 @@
-from typing import Any, Dict, Tuple
+from pathlib import Path
+from typing import Any, Dict, Tuple, Union
 
 import tensorflow as tf
 from tensorflow import Tensor
+
+from fasterrcnn.utils.data_utils.tfds_utils import modify_image_size
 
 from .backbone.factory import get_backbone
 from .detection import Detector
@@ -38,12 +41,30 @@ class FRCNN:
         self.rpn = RPN(config["rpn"])
         self.detector = Detector(config["detector"])
 
+    def _create_image_input(self, file_path: Union[str, Path]) -> Tensor:
+        """Create an image given the path
+
+        Args:
+            file_path (Union[str, Path]): image path
+
+        Returns:
+            Tensor: Loaded image
+        """
+        image = tf.io.read_file(file_path)
+        image = tf.io.decode_image(image)
+
+        image, _, _ = modify_image_size(image, self.cfg["image_base_size"])
+        image = tf.cast(image, tf.int32)[:, :, :3]
+
+        return image
+
     def __call__(self, x: Tensor) -> Tuple[Tensor, Tensor]:
         """Given an input Tensor, x, obtain object bounding boxes,  labels, class scores
 
         Args:
-            x (Tensor): The input Tensor of an image for which objects are to be detected.
-             3-D float32 Tensor. If 4-D then the first dimension (batch) must be 1
+            x (Tensor): The input Tensor of an image for which objects are to be
+             detected. 3-D float32 Tensor. If 4-D then the first dimension (batch)
+             must be 1
 
         Raises:
             Exception: When batch dimension is greater than 1
@@ -52,6 +73,10 @@ class FRCNN:
         Returns:
             Tuple[Tensor, Tensor]: The labeled bounding boxes and class scores
         """
+        if isinstance(x, (Path, str)):
+            image = self._create_image_input(x)
+            x = image * 1
+
         if len(x.shape) == 3:
             x = tf.expand_dims(x, 0)
         elif x.shape[0] > 1:
@@ -138,4 +163,4 @@ class FRCNN:
                 self.cfg["detector"]["top_n"],
             )
 
-        return bboxes, scores
+        return image, bboxes, scores
