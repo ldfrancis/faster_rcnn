@@ -1,10 +1,10 @@
+import time
 from abc import abstractmethod
 from typing import Any, Dict
 
 import tensorflow as tf
 from absl import logging as logger
 from fasterrcnn.utils.path_utils import resolve_path
-import time
 
 
 class BaseLogger:
@@ -70,7 +70,7 @@ class TensorboardLogger(BaseLogger):
             self.to_wandb()
 
         self.time = time.time()
-        self.message_time_interval = 30 
+        self.message_time_interval = 30
 
     def log(self, info_dict: Dict[str, Any]) -> None:
         """Logs training info to tensorboard
@@ -83,8 +83,7 @@ class TensorboardLogger(BaseLogger):
         global_step = self.global_step
         step = info_dict["trainer_step"]
 
-
-        if time.time() - self.time > self.print_time_interval:
+        if time.time() - self.time > self.meassage_time_interval:
             message = ""
             for k, v in info_dict.items():
                 v = v if isinstance(v, int) else f"{v:.4f}"
