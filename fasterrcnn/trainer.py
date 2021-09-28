@@ -43,6 +43,7 @@ class Trainer:
         self.rpn_optimizer = Adam(float(self.cfg["rpn_lr"]))
 
         self.best_score = tf.Variable(np.inf, dtype=tf.float32)
+        self.eval_loss = np.inf
 
         self.ckpt = None
         self.checkpoint_path = None
@@ -89,7 +90,6 @@ class Trainer:
                 )
             else:
                 self.logger.warning(f"Restored checkpoint from {restore_path}")
-
 
     def rpn_loss(
         self,
@@ -139,7 +139,6 @@ class Trainer:
 
         return total_loss
 
-     
     def detector_loss(
         self,
         proposal_targets: Tensor,
@@ -225,13 +224,37 @@ class Trainer:
                 3: self.train_rpn_fb_step,
                 4: self.train_detector_fb_step,
             }
+            self.forward_method_map = {
+                1: self.rpn_forward_step,
+                2: self.detector_forward_step,
+                3: self.rpn_forward_step,
+                4: self.detector_forward_fb_step,
+            }
             self.train4step()
         elif self.cfg["train_type"] == "approximate":
             self.train_approximate()
 
-    def compute_evaluation_metric(self):
+    def compute_evaluation_loss(self, step_function):
         assert self.valid_dataset is not None
-        pass
+        mean_loss = tf.keras.metrics.Mean()
+        for b, example in enumerate(self.valid_dataset):
+            image, gt_bboxes = create_data(example, self.cfg["image_base_size"])
+            x = tf.expand_dims(image, 0)
+            H, W = x.shape[1:3]
+            im_size = tf.constant([H, W])  # H, W
+            loss = step_function(image, gt_bboxes)
+            mean_loss.update_state(loss)
+        if self.eval_loss > mean_loss.result().numpy():
+            self.eval_loss = mean_loss.result().numpy()
+            self.patience = 5
+        else:
+            self.patience -= 1
+            
+        return self.eval_loss, mean_loss.result().numpy(), self.patience
+
+    def reset_eval_loss(self):
+        self.eval_loss = np.inf
+        self.patience = 5
 
     def train_approximate(self):
         """Train using the approximate joint training procedure"""
@@ -245,20 +268,26 @@ class Trainer:
                     gt_bboxes,
                 )
                 mean_loss.update_state(loss)
+                
+                if self.logger.has_message_time_elapsed():
+                    best_eval_loss, eval_loss, patience = self.compute_evaluation_loss(self.forward_method_map[step])
+                    if self.patience <= 0:
+                        end_epoch = True
 
                 self.logger.log(
                     {
                         "trainer_step": 1,
                         "loss": loss,
                         "mean_loss": mean_loss.result(),
+                        "best_eval_loss": best_eval_loss,
+                        "eval_loss": eval_loss,
+                        "patience": patience,
                         "epoch": epoch,
                         "batch": b,
                     }
                 )
             score = (
-                mean_loss.result()
-                if self.evaluation_metric == "loss"
-                else self.compute_evaluation_metric()
+                self.eval_loss
             )
             if self.checkpoint.update(score):
                 self.logger.warning(
@@ -267,7 +296,92 @@ class Trainer:
                     f"of {self.checkpoint.best_score}"
                 )
 
-     
+    def approximate_forward_step(self, image, im_size, gt_bboxes):
+        """Forward from backbone to rpn to detector
+
+        Args:
+            image (Tensor): Input image, 4-D float32 Tensor of shape (1,H,W,3)
+            im_size: size of image 1-D tensor of shape (2,)
+            gt_bboxes (Tensor): The ground truth bounding boxes, 2-D float32 Tensor of
+             shape (num_boxes, 5)
+
+        Returns:
+            Tensor: The output loss, 0-D float32 Tensor, Scalar
+        feat_map = self.main_backbone.head(image)
+        rpn_deltas, rpn_scores = self.rpn(feat_map)
+        anchors = generate_anchors(
+            feat_map,
+            tf.constant(self.cfg["rpn"]["anchor_base_size"]),
+            tf.constant(self.cfg["rpn"]["stride"]),
+            tf.constant(self.cfg["rpn"]["anchor_scales"]),
+            tf.constant(self.cfg["rpn"]["anchor_ratios"]),
+        )
+        rpn_targets, rpn_labels = generate_rpn_targets(
+            anchors,
+            gt_bboxes,
+            im_size,
+            tf.constant(self.cfg["margin"]),
+            tf.constant(self.cfg["clobber_positive"]),
+            tf.constant(self.cfg["neg_iou_thresh"]),
+            tf.constant(self.cfg["pos_iou_thresh"]),
+            tf.constant(self.cfg["pos_anchors_perc"]),
+            tf.constant(self.cfg["anchor_batch"]),
+        )
+        # rpn loss
+        rpnloss = self.rpn_loss(rpn_targets, rpn_labels, rpn_deltas, rpn_scores)
+
+        # decode proposals
+        rpn_proposals = decode(anchors, rpn_deltas)
+
+        # filter and suppress proposals
+        rpn_scores = rpn_scores[:, 1]
+        rpn_proposals, rpn_scores = filter_proposals(
+            rpn_proposals, rpn_scores, im_size
+        )
+
+        rpn_proposals, rpn_scores = apply_nms(
+            rpn_proposals,
+            rpn_scores,
+            tf.constant(self.cfg["rpn"]["nms_threshold"], tf.float32),
+            tf.constant(self.cfg["rpn"]["top_n"], tf.int32),
+        )
+
+        # generate detector targets
+        bbox_targets, bbox_labels = generate_detector_targets(
+            rpn_proposals,
+            gt_bboxes,
+            tf.constant(self.cfg["bg_low"], tf.float32),
+            tf.constant(self.cfg["bg_high"], tf.float32),
+            tf.constant(self.cfg["fg_low"], tf.float32),
+            tf.constant(self.cfg["pos_prop_perc"], tf.float32),
+            tf.constant(self.cfg["prop_batch"], tf.int32),
+        )
+
+        # roi pooling
+        rois = roi_pooling(
+            feat_map,
+            rpn_proposals,
+            W,
+            H,
+            pool_size=tf.constant(self.cfg["pool_size"], tf.int32),
+        )
+
+        # process rois
+        rois = self.main_backbone.tail(rois)
+
+        # detector prediction
+        bbox_deltas, cls_score = self.detector(rois)
+
+        # calculate detector loss
+        detectorloss = self.detector_loss(
+            bbox_targets, bbox_labels, bbox_deltas, cls_score
+        )
+
+        total_loss = detectorloss + rpnloss
+        
+        return total_loss
+
+    
     def train_approximate_step(
         self,
         image: Tensor,
@@ -288,77 +402,7 @@ class Trainer:
         im_size = tf.constant([H, W])  # H, W
 
         with tf.GradientTape() as tape:
-            feat_map = self.main_backbone.head(x)
-            rpn_deltas, rpn_scores = self.rpn(feat_map)
-            anchors = generate_anchors(
-                feat_map,
-                tf.constant(self.cfg["rpn"]["anchor_base_size"]),
-                tf.constant(self.cfg["rpn"]["stride"]),
-                tf.constant(self.cfg["rpn"]["anchor_scales"]),
-                tf.constant(self.cfg["rpn"]["anchor_ratios"]),
-            )
-            rpn_targets, rpn_labels = generate_rpn_targets(
-                anchors,
-                gt_bboxes,
-                im_size,
-                tf.constant(self.cfg["margin"]),
-                tf.constant(self.cfg["clobber_positive"]),
-                tf.constant(self.cfg["neg_iou_thresh"]),
-                tf.constant(self.cfg["pos_iou_thresh"]),
-                tf.constant(self.cfg["pos_anchors_perc"]),
-                tf.constant(self.cfg["anchor_batch"]),
-            )
-            # rpn loss
-            rpnloss = self.rpn_loss(rpn_targets, rpn_labels, rpn_deltas, rpn_scores)
-
-            # decode proposals
-            rpn_proposals = decode(anchors, rpn_deltas)
-
-            # filter and suppress proposals
-            rpn_scores = rpn_scores[:, 1]
-            rpn_proposals, rpn_scores = filter_proposals(
-                rpn_proposals, rpn_scores, im_size
-            )
-
-            rpn_proposals, rpn_scores = apply_nms(
-                rpn_proposals,
-                rpn_scores,
-                tf.constant(self.cfg["rpn"]["nms_threshold"], tf.float32),
-                tf.constant(self.cfg["rpn"]["top_n"], tf.int32),
-            )
-
-            # generate detector targets
-            bbox_targets, bbox_labels = generate_detector_targets(
-                rpn_proposals,
-                gt_bboxes,
-                tf.constant(self.cfg["bg_low"], tf.float32),
-                tf.constant(self.cfg["bg_high"], tf.float32),
-                tf.constant(self.cfg["fg_low"], tf.float32),
-                tf.constant(self.cfg["pos_prop_perc"], tf.float32),
-                tf.constant(self.cfg["prop_batch"], tf.int32),
-            )
-
-            # roi pooling
-            rois = roi_pooling(
-                feat_map,
-                rpn_proposals,
-                W,
-                H,
-                pool_size=tf.constant(self.cfg["pool_size"], tf.int32),
-            )
-
-            # process rois
-            rois = self.main_backbone.tail(rois)
-
-            # detector prediction
-            bbox_deltas, cls_score = self.detector(rois)
-
-            # calculate detector loss
-            detectorloss = self.detector_loss(
-                bbox_targets, bbox_labels, bbox_deltas, cls_score
-            )
-
-            total_loss = detectorloss + rpnloss
+            total_loss = approximate_forward_step(x, im_size, gt_bboxes)
 
         (
             rpn_grads,
@@ -411,27 +455,36 @@ class Trainer:
 
         def _run_trainer_step(step: int, message: str):
             self.logger.warning(f"\nStep {step}: {message}")
+            end_epoch = False
             for epoch in range(1, epochs + 1):
                 mean_loss = tf.keras.metrics.Mean()
                 for b, example in enumerate(self.dataset):
                     image, gt_bboxes = create_data(example, base_size)
                     loss = self.step_method_map[step](image, gt_bboxes)
                     mean_loss.update_state(loss)
-                    self.logger.log(
-                        {
-                            "trainer_step": step,
-                            "loss": loss,
-                            "mean_loss": mean_loss.result(),
-                            "epoch": epoch,
-                            "batch": b,
-                        }
-                    )
+                    
+                    if self.logger.has_message_time_elapsed():
+                        best_eval_loss, eval_loss, patience = self.compute_evaluation_loss(self.forward_method_map[step])
+                        if self.patience <= 0:
+                            end_epoch = True
+                        
+                        self.logger.log(
+                            {
+                                "trainer_step": step,
+                                "loss": loss,
+                                "mean_loss": mean_loss.result(),
+                                "best_eval_loss": best_eval_loss,
+                                "eval_loss": eval_loss,
+                                "patience": patience,
+                                "epoch": epoch,
+                                "batch": b,
+                            }
+                        )
+                    
 
                 if step in [2, 4]:
                     score = (
-                        mean_loss.result()
-                        if self.evaluation_metric == "loss"
-                        else self.compute_evaluation_metric()
+                        self.eval_loss
                     )
                     if self.checkpoint.update(score):
                         self.logger.warning(
@@ -439,6 +492,8 @@ class Trainer:
                             f"{self.checkpoint.train_type} with {self.checkpoint.metric} "
                             f"of {self.checkpoint.best_score}"
                         )
+                if end_epoch:
+                    break
 
             if step == 2:
                 self.main_backbone.head.set_weights(
@@ -458,7 +513,6 @@ class Trainer:
             self.trainer_step.assign(step)
             _run_trainer_step(step, message)
 
-
     def train_rpn_fb_step(self, image: Tensor, gt_bboxes: Tensor) -> Tensor:
         """Train the RPN using a fixed backbone network
 
@@ -475,28 +529,8 @@ class Trainer:
         im_size = tf.constant([H, W])  # H, W
 
         with tf.GradientTape() as tape:
-            feat_map = self.main_backbone.head(x)
-            rpn_deltas, rpn_scores = self.rpn(feat_map)
-            anchors = generate_anchors(
-                feat_map,
-                tf.constant(self.cfg["rpn"]["anchor_base_size"]),
-                tf.constant(self.cfg["rpn"]["stride"]),
-                tf.constant(self.cfg["rpn"]["anchor_scales"]),
-                tf.constant(self.cfg["rpn"]["anchor_ratios"]),
-            )
-            rpn_targets, rpn_labels = generate_rpn_targets(
-                anchors,
-                gt_bboxes,
-                im_size,
-                tf.constant(self.cfg["margin"]),
-                tf.constant(self.cfg["clobber_positive"]),
-                tf.constant(self.cfg["neg_iou_thresh"]),
-                tf.constant(self.cfg["pos_iou_thresh"]),
-                tf.constant(self.cfg["pos_anchors_perc"]),
-                tf.constant(self.cfg["anchor_batch"]),
-            )
             # rpn loss
-            rpnloss = self.rpn_loss(rpn_targets, rpn_labels, rpn_deltas, rpn_scores)
+            rpnloss = self.rpn_forward_step(x, im_size, gt_bboxes)
             total_loss = rpnloss
 
         rpn_grads = tape.gradient(total_loss, self.rpn.trainable_variables)
@@ -510,7 +544,44 @@ class Trainer:
 
         return total_loss
 
-     
+    def rpn_forward_step(
+        self, image: Tensor, im_size: Tensor, gt_bboxes: Tensor
+    ) -> Tensor:
+        """Forward pass for the rpn step
+
+        Args:
+            image (Tensor): Input image, 4-D float32 Tensor of shape (1,H,W,3)
+            im_size: size of image 1-D tensor of shape (2,)
+            gt_bboxes (Tensor): The ground truth bounding boxes, 2-D float32 Tensor of
+             shape (num_boxes, 5)
+
+        Returns:
+            Tensor: The output loss, 0-D float32 Tensor, Scalar
+        """
+        feat_map = self.main_backbone.head(image)
+        rpn_deltas, rpn_scores = self.rpn(feat_map)
+        anchors = generate_anchors(
+            feat_map,
+            tf.constant(self.cfg["rpn"]["anchor_base_size"]),
+            tf.constant(self.cfg["rpn"]["stride"]),
+            tf.constant(self.cfg["rpn"]["anchor_scales"]),
+            tf.constant(self.cfg["rpn"]["anchor_ratios"]),
+        )
+        rpn_targets, rpn_labels = generate_rpn_targets(
+            anchors,
+            gt_bboxes,
+            im_size,
+            tf.constant(self.cfg["margin"]),
+            tf.constant(self.cfg["clobber_positive"]),
+            tf.constant(self.cfg["neg_iou_thresh"]),
+            tf.constant(self.cfg["pos_iou_thresh"]),
+            tf.constant(self.cfg["pos_anchors_perc"]),
+            tf.constant(self.cfg["anchor_batch"]),
+        )
+        # rpn loss
+        rpnloss = self.rpn_loss(rpn_targets, rpn_labels, rpn_deltas, rpn_scores)
+        total_loss = rpnloss
+
     def train_rpn_step(self, image: Tensor, gt_bboxes: Tensor) -> Tensor:
         """Train the RPN, including the backbone, for just one step
 
@@ -527,29 +598,8 @@ class Trainer:
         im_size = tf.constant([H, W])  # H, W
 
         with tf.GradientTape() as tape:
-            feat_map = self.main_backbone.head(x)
-            rpn_deltas, rpn_scores = self.rpn(feat_map)
-            anchors = generate_anchors(
-                feat_map,
-                tf.constant(self.cfg["rpn"]["anchor_base_size"]),
-                tf.constant(self.cfg["rpn"]["stride"]),
-                tf.constant(self.cfg["rpn"]["anchor_scales"]),
-                tf.constant(self.cfg["rpn"]["anchor_ratios"]),
-            )
-            rpn_targets, rpn_labels = generate_rpn_targets(
-                anchors,
-                gt_bboxes,
-                im_size,
-                tf.constant(self.cfg["margin"]),
-                tf.constant(self.cfg["clobber_positive"]),
-                tf.constant(self.cfg["neg_iou_thresh"]),
-                tf.constant(self.cfg["pos_iou_thresh"]),
-                tf.constant(self.cfg["pos_anchors_perc"]),
-                tf.constant(self.cfg["anchor_batch"]),
-            )
             # rpn loss
-            rpnloss = self.rpn_loss(rpn_targets, rpn_labels, rpn_deltas, rpn_scores)
-            total_loss = rpnloss
+            rpnloss = self.rpn_forward_step(x, im_size, gt_bboxes)
 
         rpn_grads, base_grads = tape.gradient(
             total_loss,
@@ -568,7 +618,147 @@ class Trainer:
 
         return total_loss
 
-     
+    def detector_forward_step(
+        self, image: Tensor, im_size: Tensor, gt_bboxes: Tensor
+    ) -> Tensor:
+        """Forward pass for the detector step
+
+        Args:
+            image (Tensor): Input image, 4-D float32 Tensor of shape (1,H,W,3)
+            im_size: size of image 1-D tensor of shape (2,)
+            gt_bboxes (Tensor): The ground truth bounding boxes, 2-D float32 Tensor of
+             shape (num_boxes, 5)
+
+        Returns:
+            Tensor: The output loss, 0-D float32 Tensor, Scalar
+        """
+        feat_map_det = self.detector_backbone_head(image)
+        feat_map_rpn = self.main_backbone.head(image)
+        anchors = generate_anchors(
+            feat_map_det,
+            tf.constant(self.cfg["rpn"]["anchor_base_size"], tf.int32),
+            tf.constant(self.cfg["rpn"]["stride"], tf.int32),
+            tf.constant(self.cfg["rpn"]["anchor_scales"], tf.float32),
+            tf.constant(self.cfg["rpn"]["anchor_ratios"], tf.float32),
+        )
+        rpn_deltas, rpn_scores = self.rpn(feat_map_rpn)
+
+        # decode proposals
+        rpn_proposals = decode(anchors, rpn_deltas)
+
+        # filter and suppress proposals
+        rpn_scores = rpn_scores[:, 1]
+        rpn_proposals, rpn_scores = filter_proposals(rpn_proposals, rpn_scores, im_size)
+
+        rpn_proposals, rpn_scores = apply_nms(
+            rpn_proposals,
+            rpn_scores,
+            tf.constant(self.cfg["rpn"]["nms_threshold"], tf.float32),
+            tf.constant(self.cfg["rpn"]["top_n"], tf.int32),
+        )
+
+        # generate detector targets
+        bbox_targets, bbox_labels = generate_detector_targets(
+            rpn_proposals,
+            gt_bboxes,
+            tf.constant(self.cfg["bg_low"], tf.float32),
+            tf.constant(self.cfg["bg_high"], tf.float32),
+            tf.constant(self.cfg["fg_low"], tf.float32),
+            tf.constant(self.cfg["pos_prop_perc"], tf.float32),
+            tf.constant(self.cfg["prop_batch"], tf.int32),
+        )
+
+        # roi pooling
+        rois = roi_pooling(
+            feat_map_det,
+            rpn_proposals,
+            W,
+            H,
+            pool_size=tf.constant(self.cfg["pool_size"], tf.int32),
+        )
+
+        # process rois
+        rois = self.main_backbone.tail(rois)
+
+        # detector prediction
+        bbox_deltas, cls_score = self.detector(rois)
+
+        # calculate detector loss
+        detectorloss = self.detector_loss(
+            bbox_targets, bbox_labels, bbox_deltas, cls_score
+        )
+        return detectorloss
+
+    def detector_forward_fb_step(
+        self, image: Tensor, im_size: Tensor, gt_bboxes: Tensor
+    ) -> Tensor:
+        """Forward pass for the detector step
+
+        Args:
+            image (Tensor): Input image, 4-D float32 Tensor of shape (1,H,W,3)
+            im_size: size of image 1-D tensor of shape (2,)
+            gt_bboxes (Tensor): The ground truth bounding boxes, 2-D float32 Tensor of
+             shape (num_boxes, 5)
+
+        Returns:
+            Tensor: The output loss, 0-D float32 Tensor, Scalar
+        """
+        feat_map = self.main_backbone.head(image)
+        anchors = generate_anchors(
+            feat_map_det,
+            tf.constant(self.cfg["rpn"]["anchor_base_size"], tf.int32),
+            tf.constant(self.cfg["rpn"]["stride"], tf.int32),
+            tf.constant(self.cfg["rpn"]["anchor_scales"], tf.float32),
+            tf.constant(self.cfg["rpn"]["anchor_ratios"], tf.float32),
+        )
+        rpn_deltas, rpn_scores = self.rpn(feat_map)
+
+        # decode proposals
+        rpn_proposals = decode(anchors, rpn_deltas)
+
+        # filter and suppress proposals
+        rpn_scores = rpn_scores[:, 1]
+        rpn_proposals, rpn_scores = filter_proposals(rpn_proposals, rpn_scores, im_size)
+
+        rpn_proposals, rpn_scores = apply_nms(
+            rpn_proposals,
+            rpn_scores,
+            tf.constant(self.cfg["rpn"]["nms_threshold"], tf.float32),
+            tf.constant(self.cfg["rpn"]["top_n"], tf.int32),
+        )
+
+        # generate detector targets
+        bbox_targets, bbox_labels = generate_detector_targets(
+            rpn_proposals,
+            gt_bboxes,
+            tf.constant(self.cfg["bg_low"], tf.float32),
+            tf.constant(self.cfg["bg_high"], tf.float32),
+            tf.constant(self.cfg["fg_low"], tf.float32),
+            tf.constant(self.cfg["pos_prop_perc"], tf.float32),
+            tf.constant(self.cfg["prop_batch"], tf.int32),
+        )
+
+        # roi pooling
+        rois = roi_pooling(
+            feat_map,
+            rpn_proposals,
+            W,
+            H,
+            pool_size=tf.constant(self.cfg["pool_size"], tf.int32),
+        )
+
+        # process rois
+        rois = self.main_backbone.tail(rois)
+
+        # detector prediction
+        bbox_deltas, cls_score = self.detector(rois)
+
+        # calculate detector loss
+        detectorloss = self.detector_loss(
+            bbox_targets, bbox_labels, bbox_deltas, cls_score
+        )
+        return detectorloss
+
     def train_detector_step(self, image: Tensor, gt_bboxes: Tensor) -> Tensor:
         """Train the detector, including the backbone, for just one step
 
@@ -585,63 +775,8 @@ class Trainer:
         im_size = tf.constant([H, W], tf.int32)
 
         with tf.GradientTape() as tape:
-            feat_map_det = self.detector_backbone_head(x)
-            feat_map_rpn = self.main_backbone.head(x)
-            anchors = generate_anchors(
-                feat_map_det,
-                tf.constant(self.cfg["rpn"]["anchor_base_size"], tf.int32),
-                tf.constant(self.cfg["rpn"]["stride"], tf.int32),
-                tf.constant(self.cfg["rpn"]["anchor_scales"], tf.float32),
-                tf.constant(self.cfg["rpn"]["anchor_ratios"], tf.float32),
-            )
-            rpn_deltas, rpn_scores = self.rpn(feat_map_rpn)
-
-            # decode proposals
-            rpn_proposals = decode(anchors, rpn_deltas)
-
-            # filter and suppress proposals
-            rpn_scores = rpn_scores[:, 1]
-            rpn_proposals, rpn_scores = filter_proposals(
-                rpn_proposals, rpn_scores, im_size
-            )
-
-            rpn_proposals, rpn_scores = apply_nms(
-                rpn_proposals,
-                rpn_scores,
-                tf.constant(self.cfg["rpn"]["nms_threshold"], tf.float32),
-                tf.constant(self.cfg["rpn"]["top_n"], tf.int32),
-            )
-
-            # generate detector targets
-            bbox_targets, bbox_labels = generate_detector_targets(
-                rpn_proposals,
-                gt_bboxes,
-                tf.constant(self.cfg["bg_low"], tf.float32),
-                tf.constant(self.cfg["bg_high"], tf.float32),
-                tf.constant(self.cfg["fg_low"], tf.float32),
-                tf.constant(self.cfg["pos_prop_perc"], tf.float32),
-                tf.constant(self.cfg["prop_batch"], tf.int32),
-            )
-
-            # roi pooling
-            rois = roi_pooling(
-                feat_map_det,
-                rpn_proposals,
-                W,
-                H,
-                pool_size=tf.constant(self.cfg["pool_size"], tf.int32),
-            )
-
-            # process rois
-            rois = self.main_backbone.tail(rois)
-
-            # detector prediction
-            bbox_deltas, cls_score = self.detector(rois)
-
             # calculate detector loss
-            detectorloss = self.detector_loss(
-                bbox_targets, bbox_labels, bbox_deltas, cls_score
-            )
+            detectorloss = self.detector_forward_step(x, im_size, gt_bboxes)
 
         detector_grads, base_grads, tail_grads = tape.gradient(
             detectorloss,
@@ -675,7 +810,6 @@ class Trainer:
 
         return detectorloss
 
-     
     def train_detector_fb_step(self, image: Tensor, gt_bboxes: Tensor) -> Tensor:
         """Train the detector, with the backbone fixed, for just one step
 
@@ -692,62 +826,8 @@ class Trainer:
         im_size = tf.constant([H, W], tf.int32)
 
         with tf.GradientTape() as tape:
-            feat_map = self.main_backbone.head(x)
-            anchors = generate_anchors(
-                feat_map,
-                tf.constant(self.cfg["rpn"]["anchor_base_size"], tf.int32),
-                tf.constant(self.cfg["rpn"]["stride"], tf.int32),
-                tf.constant(self.cfg["rpn"]["anchor_scales"], tf.float32),
-                tf.constant(self.cfg["rpn"]["anchor_ratios"], tf.float32),
-            )
-            rpn_deltas, rpn_scores = self.rpn(feat_map)
-
-            # decode proposals
-            rpn_proposals = decode(anchors, rpn_deltas)
-
-            # filter and suppress proposals
-            rpn_scores = rpn_scores[:, 1]
-            rpn_proposals, rpn_scores = filter_proposals(
-                rpn_proposals, rpn_scores, im_size
-            )
-
-            rpn_proposals, rpn_scores = apply_nms(
-                rpn_proposals,
-                rpn_scores,
-                tf.constant(self.cfg["rpn"]["nms_threshold"], tf.float32),
-                tf.constant(self.cfg["rpn"]["top_n"], tf.int32),
-            )
-
-            # generate detector targets
-            bbox_targets, bbox_labels = generate_detector_targets(
-                rpn_proposals,
-                gt_bboxes,
-                tf.constant(self.cfg["bg_low"], tf.float32),
-                tf.constant(self.cfg["bg_high"], tf.float32),
-                tf.constant(self.cfg["fg_low"], tf.float32),
-                tf.constant(self.cfg["pos_prop_perc"], tf.float32),
-                tf.constant(self.cfg["prop_batch"], tf.int32),
-            )
-
-            # roi pooling
-            rois = roi_pooling(
-                feat_map,
-                rpn_proposals,
-                W,
-                H,
-                pool_size=tf.constant(self.cfg["pool_size"], tf.int32),
-            )
-
-            # process rois
-            rois = self.main_backbone.tail(rois)
-
-            # detector prediction
-            bbox_deltas, cls_score = self.detector(rois)
-
             # calculate detector loss
-            detectorloss = self.detector_loss(
-                bbox_targets, bbox_labels, bbox_deltas, cls_score
-            )
+            detectorloss = self.detector_forward_fb_step(x, im_size, gt_bboxes)
 
         detector_grads, tail_grads = tape.gradient(
             detectorloss,
