@@ -72,6 +72,12 @@ class TensorboardLogger(BaseLogger):
         self.time = time.time()
         self.message_time_interval = 30
 
+    def has_message_time_elapsed(self):
+        if time.time() - self.time > self.message_time_interval:
+            return True
+        else:
+            return False
+
     def log(self, info_dict: Dict[str, Any]) -> None:
         """Logs training info to tensorboard
 
@@ -83,7 +89,7 @@ class TensorboardLogger(BaseLogger):
         global_step = self.global_step
         step = info_dict["trainer_step"]
 
-        if time.time() - self.time > self.message_time_interval:
+        if self.has_message_time_elapsed():
             message = ""
             for k, v in info_dict.items():
                 v = v if isinstance(v, int) else f"{v:.4f}"
