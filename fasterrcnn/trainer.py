@@ -249,7 +249,7 @@ class Trainer:
             self.patience = 5
         else:
             self.patience -= 1
-            
+
         return self.eval_loss, mean_loss.result().numpy(), self.patience
 
     def reset_eval_loss(self):
@@ -268,9 +268,11 @@ class Trainer:
                     gt_bboxes,
                 )
                 mean_loss.update_state(loss)
-                
+
                 if self.logger.has_message_time_elapsed():
-                    best_eval_loss, eval_loss, patience = self.compute_evaluation_loss(self.forward_method_map[step])
+                    best_eval_loss, eval_loss, patience = self.compute_evaluation_loss(
+                        self.forward_method_map[step]
+                    )
                     if self.patience <= 0:
                         end_epoch = True
 
@@ -286,9 +288,7 @@ class Trainer:
                         "batch": b,
                     }
                 )
-            score = (
-                self.eval_loss
-            )
+            score = self.eval_loss
             if self.checkpoint.update(score):
                 self.logger.warning(
                     f"Saving new checkpoint at epoch {epoch} for train type "
@@ -307,6 +307,7 @@ class Trainer:
 
         Returns:
             Tensor: The output loss, 0-D float32 Tensor, Scalar
+        """
         feat_map = self.main_backbone.head(image)
         rpn_deltas, rpn_scores = self.rpn(feat_map)
         anchors = generate_anchors(
@@ -335,9 +336,7 @@ class Trainer:
 
         # filter and suppress proposals
         rpn_scores = rpn_scores[:, 1]
-        rpn_proposals, rpn_scores = filter_proposals(
-            rpn_proposals, rpn_scores, im_size
-        )
+        rpn_proposals, rpn_scores = filter_proposals(rpn_proposals, rpn_scores, im_size)
 
         rpn_proposals, rpn_scores = apply_nms(
             rpn_proposals,
@@ -378,10 +377,9 @@ class Trainer:
         )
 
         total_loss = detectorloss + rpnloss
-        
+
         return total_loss
 
-    
     def train_approximate_step(
         self,
         image: Tensor,
@@ -462,12 +460,16 @@ class Trainer:
                     image, gt_bboxes = create_data(example, base_size)
                     loss = self.step_method_map[step](image, gt_bboxes)
                     mean_loss.update_state(loss)
-                    
+
                     if self.logger.has_message_time_elapsed():
-                        best_eval_loss, eval_loss, patience = self.compute_evaluation_loss(self.forward_method_map[step])
+                        (
+                            best_eval_loss,
+                            eval_loss,
+                            patience,
+                        ) = self.compute_evaluation_loss(self.forward_method_map[step])
                         if self.patience <= 0:
                             end_epoch = True
-                        
+
                         self.logger.log(
                             {
                                 "trainer_step": step,
@@ -480,12 +482,9 @@ class Trainer:
                                 "batch": b,
                             }
                         )
-                    
 
                 if step in [2, 4]:
-                    score = (
-                        self.eval_loss
-                    )
+                    score = self.eval_loss
                     if self.checkpoint.update(score):
                         self.logger.warning(
                             f"Saving new checkpoint at epoch {epoch} for train type "
