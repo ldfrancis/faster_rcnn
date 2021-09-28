@@ -4,6 +4,7 @@ requirements = [
     "pyyaml",
     "tensorflow",
     "tensorboard",
+    "tensorflow_datasets"
 ]
 
 setup(
