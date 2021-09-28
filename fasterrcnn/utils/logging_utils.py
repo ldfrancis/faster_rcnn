@@ -83,13 +83,14 @@ class TensorboardLogger(BaseLogger):
         global_step = self.global_step
         step = info_dict["trainer_step"]
 
-        if time.time() - self.time > self.meassage_time_interval:
+        if time.time() - self.time > self.message_time_interval:
             message = ""
             for k, v in info_dict.items():
                 v = v if isinstance(v, int) else f"{v:.4f}"
                 message += f"{k}:{v}\t"
 
             self.warning(message)
+            self.time = time.time()
 
         if not self.cfg["log"]:
             return
