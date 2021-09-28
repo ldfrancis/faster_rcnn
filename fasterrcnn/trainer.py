@@ -90,7 +90,7 @@ class Trainer:
             else:
                 self.logger.warning(f"Restored checkpoint from {restore_path}")
 
-    @tf.function
+
     def rpn_loss(
         self,
         anchor_targets: Tensor,
@@ -139,7 +139,7 @@ class Trainer:
 
         return total_loss
 
-    @tf.function
+     
     def detector_loss(
         self,
         proposal_targets: Tensor,
@@ -267,7 +267,7 @@ class Trainer:
                     f"of {self.checkpoint.best_score}"
                 )
 
-    @tf.function
+     
     def train_approximate_step(
         self,
         image: Tensor,
@@ -458,7 +458,7 @@ class Trainer:
             self.trainer_step.assign(step)
             _run_trainer_step(step, message)
 
-    @tf.function
+
     def train_rpn_fb_step(self, image: Tensor, gt_bboxes: Tensor) -> Tensor:
         """Train the RPN using a fixed backbone network
 
@@ -510,7 +510,7 @@ class Trainer:
 
         return total_loss
 
-    @tf.function
+     
     def train_rpn_step(self, image: Tensor, gt_bboxes: Tensor) -> Tensor:
         """Train the RPN, including the backbone, for just one step
 
@@ -568,7 +568,7 @@ class Trainer:
 
         return total_loss
 
-    @tf.function
+     
     def train_detector_step(self, image: Tensor, gt_bboxes: Tensor) -> Tensor:
         """Train the detector, including the backbone, for just one step
 
@@ -675,7 +675,7 @@ class Trainer:
 
         return detectorloss
 
-    @tf.function
+     
     def train_detector_fb_step(self, image: Tensor, gt_bboxes: Tensor) -> Tensor:
         """Train the detector, with the backbone fixed, for just one step
 

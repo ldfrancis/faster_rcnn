@@ -3,7 +3,7 @@ import tensorflow as tf
 from tensorflow import Tensor
 
 
-@tf.function
+  
 def generate_reference_anchors(
     base_size: Tensor, scales: Tensor, aspect_ratios: Tensor
 ) -> Tensor:
@@ -38,7 +38,7 @@ def generate_reference_anchors(
     return reference_anchors
 
 
-@tf.function
+  
 def generate_anchors(
     feat_map: Tensor,
     base_size: Tensor,

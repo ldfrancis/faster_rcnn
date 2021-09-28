@@ -6,7 +6,7 @@ import tensorflow as tf
 from tensorflow import Tensor
 
 
-@tf.function(experimental_relax_shapes=True)
+  
 def normalize_bboxes(proposals: Tensor, width: Tensor, height: Tensor) -> Tensor:
     """Normalizes the proposal bounding box cordinates to be in [0,1] using the width
     and height of the image. The normalized bounding box cordinates are ordered as
@@ -45,7 +45,7 @@ def normalize_bboxes(proposals: Tensor, width: Tensor, height: Tensor) -> Tensor
     return bboxes
 
 
-@tf.function
+  
 def roi_pooling(
     feature_map: Tensor,
     proposals: Tensor,

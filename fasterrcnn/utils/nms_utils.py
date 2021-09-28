@@ -7,7 +7,7 @@ from .bbox_utils import swap_xy
 from .proposals_utils import filter_proposals
 
 
-@tf.function(experimental_relax_shapes=True)
+  
 def apply_nms(
     bboxes: Tensor, scores: Tensor, nms_threshold: Tensor, top_n: Tensor
 ) -> Tuple[Tensor, Tensor]:

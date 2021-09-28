@@ -6,7 +6,7 @@ from tensorflow import Tensor
 from .bbox_utils import bbox_overlap, encode
 
 
-@tf.function
+  
 def generate_detector_targets(
     proposals: Tensor,
     gt_bboxes: Tensor,
