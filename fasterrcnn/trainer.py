@@ -242,7 +242,7 @@ class Trainer:
             x = tf.expand_dims(image, 0)
             H, W = x.shape[1:3]
             im_size = tf.constant([H, W])  # H, W
-            loss = step_function(image, gt_bboxes)
+            loss = step_function(image, im_size, gt_bboxes)
             mean_loss.update_state(loss)
         if self.eval_loss > mean_loss.result().numpy():
             self.eval_loss = mean_loss.result().numpy()
@@ -579,6 +579,7 @@ class Trainer:
         )
         # rpn loss
         rpnloss = self.rpn_loss(rpn_targets, rpn_labels, rpn_deltas, rpn_scores)
+
         return rpnloss
 
     def train_rpn_step(self, image: Tensor, gt_bboxes: Tensor) -> Tensor:
