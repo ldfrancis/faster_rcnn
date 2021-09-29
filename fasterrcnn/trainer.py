@@ -579,7 +579,7 @@ class Trainer:
         )
         # rpn loss
         rpnloss = self.rpn_loss(rpn_targets, rpn_labels, rpn_deltas, rpn_scores)
-        total_loss = rpnloss
+        return rpnloss
 
     def train_rpn_step(self, image: Tensor, gt_bboxes: Tensor) -> Tensor:
         """Train the RPN, including the backbone, for just one step
