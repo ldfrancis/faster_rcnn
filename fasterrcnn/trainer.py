@@ -599,6 +599,7 @@ class Trainer:
         with tf.GradientTape() as tape:
             # rpn loss
             rpnloss = self.rpn_forward_step(x, im_size, gt_bboxes)
+            total_loss = rpnloss
 
         rpn_grads, base_grads = tape.gradient(
             total_loss,
