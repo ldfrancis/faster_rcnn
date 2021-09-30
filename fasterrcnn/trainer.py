@@ -246,6 +246,7 @@ class Trainer:
             im_size = tf.constant([H, W])  # H, W
             loss = step_function(x, im_size, gt_bboxes)
             mean_loss.update_state(loss)
+            break
         if self.eval_loss > mean_loss.result().numpy():
             self.eval_loss = mean_loss.result().numpy()
             self.patience = 5
@@ -261,6 +262,8 @@ class Trainer:
     def train_approximate(self):
         """Train using the approximate joint training procedure"""
         epochs = self.cfg["epochs"]
+        end_epoch = False
+        eval_loss = np.inf
         for epoch in range(1, epochs + 1):
             mean_loss = tf.keras.metrics.Mean()
             for b, example in enumerate(self.dataset):
@@ -272,31 +275,36 @@ class Trainer:
                 mean_loss.update_state(loss)
 
                 if self.logger.has_message_time_elapsed():
-                    best_eval_loss, eval_loss, patience = self.compute_evaluation_loss(
-                        self.forward_method_map[step]
+                    _, eval_loss, _ = self.compute_evaluation_loss(
+                        self.approximate_forward_step
                     )
                     if self.patience <= 0:
                         end_epoch = True
+                        self.reset_eval_loss()
+                        break
 
                 self.logger.log(
                     {
-                        "trainer_step": 1,
                         "loss": loss,
                         "mean_loss": mean_loss.result(),
-                        "best_eval_loss": best_eval_loss,
+                        "best_eval_loss": self.eval_loss,
                         "eval_loss": eval_loss,
-                        "patience": patience,
+                        "patience": self.patience,
                         "epoch": epoch,
                         "batch": b,
                     }
                 )
+
             score = self.eval_loss
             if self.checkpoint.update(score):
                 self.logger.warning(
                     f"Saving new checkpoint at epoch {epoch} for train type "
-                    f"{self.checkpoint.train_type} with {self.checkpoint.metric} "
-                    f"of {self.checkpoint.best_score}"
+                    f"{self.checkpoint.train_type.numpy()} with {self.checkpoint.metric.numpy()} "
+                    f"of {self.checkpoint.best_score.numpy()}"
                 )
+
+            if end_epoch:
+                break
 
     def approximate_forward_step(self, image, im_size, gt_bboxes):
         """Forward from backbone to rpn to detector
@@ -310,6 +318,7 @@ class Trainer:
         Returns:
             Tensor: The output loss, 0-D float32 Tensor, Scalar
         """
+        _, H, W, _ = image.shape
         feat_map = self.main_backbone.head(image)
         rpn_deltas, rpn_scores = self.rpn(feat_map)
         anchors = generate_anchors(
@@ -402,7 +411,7 @@ class Trainer:
         im_size = tf.constant([H, W])  # H, W
 
         with tf.GradientTape() as tape:
-            total_loss = approximate_forward_step(x, im_size, gt_bboxes)
+            total_loss = self.approximate_forward_step(x, im_size, gt_bboxes)
 
         (
             rpn_grads,
@@ -456,9 +465,9 @@ class Trainer:
         def _run_trainer_step(step: int, message: str):
             self.logger.warning(f"\nStep {step}: {message}")
             end_epoch = False
+            eval_loss = np.inf
             for epoch in range(1, epochs + 1):
                 mean_loss = tf.keras.metrics.Mean()
-                eval_loss = np.inf
                 for b, example in enumerate(self.dataset):
                     image, gt_bboxes = create_data(example, base_size)
                     loss = self.step_method_map[step](image, gt_bboxes)
@@ -472,6 +481,8 @@ class Trainer:
                         ) = self.compute_evaluation_loss(self.forward_method_map[step])
                         if self.patience <= 0:
                             end_epoch = True
+                            self.reset_eval_loss()
+                            break
 
                     self.logger.log(
                         {
@@ -491,8 +502,8 @@ class Trainer:
                     if self.checkpoint.update(score):
                         self.logger.warning(
                             f"Saving new checkpoint at epoch {epoch} for train type "
-                            f"{self.checkpoint.train_type} with {self.checkpoint.metric} "
-                            f"of {self.checkpoint.best_score}"
+                            f"{self.checkpoint.train_type.numpy()} with {self.checkpoint.metric.numpy()} "
+                            f"of {self.checkpoint.best_score.numpy()}"
                         )
                 if end_epoch:
                     break
@@ -636,6 +647,7 @@ class Trainer:
         Returns:
             Tensor: The output loss, 0-D float32 Tensor, Scalar
         """
+        _, H, W, _ = image.shape
         feat_map_det = self.detector_backbone_head(image)
         feat_map_rpn = self.main_backbone.head(image)
         anchors = generate_anchors(
@@ -707,9 +719,10 @@ class Trainer:
         Returns:
             Tensor: The output loss, 0-D float32 Tensor, Scalar
         """
+        _, H, W, _ = image.shape
         feat_map = self.main_backbone.head(image)
         anchors = generate_anchors(
-            feat_map_det,
+            feat_map,
             tf.constant(self.cfg["rpn"]["anchor_base_size"], tf.int32),
             tf.constant(self.cfg["rpn"]["stride"], tf.int32),
             tf.constant(self.cfg["rpn"]["anchor_scales"], tf.float32),

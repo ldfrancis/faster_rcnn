@@ -87,7 +87,7 @@ class TensorboardLogger(BaseLogger):
 
         self.global_step += 1
         global_step = self.global_step
-        step = info_dict["trainer_step"]
+        step = info_dict.get("trainer_step", 1)
 
         if self.has_message_time_elapsed():
             message = ""
