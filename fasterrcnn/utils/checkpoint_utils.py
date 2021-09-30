@@ -3,6 +3,8 @@ from tensorflow import Variable
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Optimizer
 
+from .path_utils import resolve_path
+
 
 def create_checkpoint(
     checkpoint_path,
@@ -79,3 +81,25 @@ class Checkpoint:
     @property
     def metric(self):
         return self._ckpt.metric.numpy()
+
+
+def restore_fasterrcnn(
+    frcnn, restore_path="~/fasterrcnn/checkpoints/frcnn", train_type="4step"
+):
+
+    restore_path = resolve_path(restore_path)
+
+    trainer = Trainer(
+        frcnn,
+        {
+            "detector_lr": 1e-4,
+            "backbone_head_lr": 1e-4,
+            "backbone_tail_lr": 1e-4,
+            "rpn_lr": 1e-4,
+            "experiment_name": "dummy",
+            "restore": restore_path,
+            "train_type": train_type,
+        },
+    )
+
+    trainer.create_checkpoint()

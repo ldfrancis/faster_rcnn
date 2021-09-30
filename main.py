@@ -10,6 +10,7 @@ from absl import logging as logger
 
 from fasterrcnn.frcnn import FRCNN
 from fasterrcnn.trainer import Trainer
+from fasterrcnn.utils.checkpoint_utils import restore_fasterrcnn
 from fasterrcnn.utils.config_utils import load_config
 from fasterrcnn.utils.data_utils import obtain_dataset
 from fasterrcnn.utils.data_utils.data_utils import display_image, obtain_class_names
@@ -65,6 +66,7 @@ def main(train, log, dataset, input, output):
         (train_dataset, val_dataset, _), _ = obtain_dataset(dataset)
         trainer.train(train_dataset, val_dataset)
     else:
+        restore_fasterrcnn(frcnn)
         output = output or "./output"
         assert input is not None and output is not None, (
             "Please provide an input and output paths for prediction.\nExample:\n "
