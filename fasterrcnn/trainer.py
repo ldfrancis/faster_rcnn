@@ -52,6 +52,8 @@ class Trainer:
         self.logger = TensorboardLogger(self.cfg)
         self.trainer_step = tf.Variable(1)
 
+        self.patience = 5
+
     def create_checkpoint(self):
         """Checkpoint for saving train progress and enabling training resumption"""
         max_to_keep = self.cfg.get("max_to_keep", 5)
