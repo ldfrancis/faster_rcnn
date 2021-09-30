@@ -456,6 +456,7 @@ class Trainer:
             end_epoch = False
             for epoch in range(1, epochs + 1):
                 mean_loss = tf.keras.metrics.Mean()
+                eval_loss = np.inf
                 for b, example in enumerate(self.dataset):
                     image, gt_bboxes = create_data(example, base_size)
                     loss = self.step_method_map[step](image, gt_bboxes)
@@ -463,25 +464,25 @@ class Trainer:
 
                     if self.logger.has_message_time_elapsed():
                         (
-                            best_eval_loss,
+                            _,
                             eval_loss,
                             patience,
                         ) = self.compute_evaluation_loss(self.forward_method_map[step])
                         if self.patience <= 0:
                             end_epoch = True
 
-                        self.logger.log(
-                            {
-                                "trainer_step": step,
-                                "loss": loss,
-                                "mean_loss": mean_loss.result(),
-                                "best_eval_loss": best_eval_loss,
-                                "eval_loss": eval_loss,
-                                "patience": patience,
-                                "epoch": epoch,
-                                "batch": b,
-                            }
-                        )
+                    self.logger.log(
+                        {
+                            "trainer_step": step,
+                            "loss": loss,
+                            "mean_loss": mean_loss.result(),
+                            "best_eval_loss": self.eval_loss,
+                            "eval_loss": eval_loss,
+                            "patience": self.patience,
+                            "epoch": epoch,
+                            "batch": b,
+                        }
+                    )
 
                 if step in [2, 4]:
                     score = self.eval_loss
