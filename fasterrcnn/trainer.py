@@ -52,7 +52,7 @@ class Trainer:
         self.logger = TensorboardLogger(self.cfg)
         self.trainer_step = tf.Variable(1)
 
-        self.patience = 5
+        self.patience = 10
 
     def create_checkpoint(self):
         """Checkpoint for saving train progress and enabling training resumption"""
@@ -246,10 +246,10 @@ class Trainer:
             im_size = tf.constant([H, W])  # H, W
             loss = step_function(x, im_size, gt_bboxes)
             mean_loss.update_state(loss)
-            break
+
         if self.eval_loss > mean_loss.result().numpy():
             self.eval_loss = mean_loss.result().numpy()
-            self.patience = 5
+            self.patience = 10
         else:
             self.patience -= 1
 
@@ -257,7 +257,8 @@ class Trainer:
 
     def reset_eval_loss(self):
         self.eval_loss = np.inf
-        self.patience = 5
+        self.checkpoint.best_score.assign(np.inf)
+        self.patience = 10
 
     def train_approximate(self):
         """Train using the approximate joint training procedure"""
@@ -481,7 +482,6 @@ class Trainer:
                         ) = self.compute_evaluation_loss(self.forward_method_map[step])
                         if self.patience <= 0:
                             end_epoch = True
-                            self.reset_eval_loss()
                             break
 
                     self.logger.log(
@@ -497,15 +497,16 @@ class Trainer:
                         }
                     )
 
-                if step in [2, 4]:
+                if step in [1, 2, 3, 4]:
                     score = self.eval_loss
                     if self.checkpoint.update(score):
                         self.logger.warning(
                             f"Saving new checkpoint at epoch {epoch} for train type "
-                            f"{self.checkpoint.train_type.numpy()} with {self.checkpoint.metric.numpy()} "
+                            f"{str(self.checkpoint.train_type)} at step {step} with {str(self.checkpoint.metric)} "
                             f"of {self.checkpoint.best_score.numpy()}"
                         )
                 if end_epoch:
+                    self.reset_eval_loss()
                     break
 
             if step == 2:
