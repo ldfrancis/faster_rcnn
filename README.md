@@ -41,7 +41,7 @@ To use as a cli application, use any of the following commands to perform the de
 
 
 ### as a package
-This can be used withing a python project like so;
+This can be used within a python project like so;
 ```python
 from fasterrcnn import FRCNN
 from fasterrcnn.utils import (
@@ -116,7 +116,7 @@ class ResNet101Extractor(Extractor):
 The backbone is further split into two parts, a head and a tail. The head part is responsible for preprocessing the input image and extracting a feature map for the RPN while the tail part is responsible for further processing features of proposed regions before passing them to the detector and is built using the conv5 layer of ResNet 101. The tail network's input comes from the layer 'conv4_block23_out' and it's output is the last layer in conv5. The tail network implementation can be found [here](fasterrcnn/backbone/tail_network). 
 
 ### The RPN
-The RPN is responsible for proposing object regions in an image. It consisting of base convolutional network (this uses 512 3x3 filters) that takes in the feature map from the backbone. The output from this base convolution retains the input dimensions (widht and height) and has 512 channels. This is then fed into two seperate convolutional layers. One convolution layer computes offsets for the bounding boxes with respect to a set of anchor boxes. This layer uses k*4 1x1 filters, where k is the number of anchor boxes. The other layer computes the objectness score. 
+The RPN is responsible for proposing object regions in an image. It consisting of base convolutional network (this uses 512 3x3 filters) that takes in the feature map from the backbone. The output from this base convolution retains the input dimensions (width and height) and has 512 channels. This is then fed into two seperate convolutional layers. One convolution layer computes offsets for the bounding boxes with respect to a set of anchor boxes. This layer uses k*4 1x1 filters, where k is the number of anchor boxes. The other layer computes the objectness score. 
 #### The anchors
 The anchor boxes are usually defined using a reference/base size and some aspect ratios and scales. Given a base size of (256,256), 3 aspect ratios, and 3 scales, we get a total of 3x3=9 anchor boxes. This anchor boxes might not fit the ground truth bounding boxes perfectly so the RPN aims to predict offsets to this anchors such that when applied to the anchors would give rise to bounding boxes that are well aligned with the ground truth boxes. Anchor generation is implemented [here]()
 
